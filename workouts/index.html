@@ -1,11 +1,13 @@
 <!doctype html>
 <html lang="fr">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Workouts</title>
   <link rel="stylesheet" href="./workouts.css" />
 </head>
+
 <body>
   <div class="app" id="app">
     <header class="topbar">
@@ -21,6 +23,7 @@
       </nav>
 
       <div class="actions">
+        <button class="btn btn-ghost" id="btnMute" aria-pressed="false" title="Activer/Désactiver le son">Son: ON</button>
         <button class="btn btn-ghost" id="btnExport" title="Exporter JSON">Export</button>
         <label class="btn btn-ghost filelike" title="Importer JSON">
           Import
@@ -170,4 +173,5 @@
 
   <script type="module" src="./workouts.js"></script>
 </body>
+
 </html>

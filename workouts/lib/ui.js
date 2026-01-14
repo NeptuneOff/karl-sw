@@ -38,6 +38,15 @@ export class UI {
   }
 
   mount(root) {
+    document.addEventListener("visibilitychange", () => {
+      // si l’onglet n’est plus visible : coupe tout
+      if (document.hidden) this.forceStopAll();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      this.forceStopAll();
+    });
+
     this.root = root;
 
     // tabs
@@ -186,7 +195,30 @@ export class UI {
     runnerTab.disabled = !this.currentWorkout;
   }
 
+  forceStopAll() {
+    // stop tous les timers + état runner
+    this.clearStepRuntime();
+    if (this.globalTimer?.stop) this.globalTimer.stop();
+    this.globalTimer = null;
+
+    this.autoRun = false;
+    this.isPaused = false;
+    this.stepMode = "idle";
+
+    // reset UI basique (optionnel)
+    if (this.el?.globalTime) this.el.globalTime.textContent = "00:00";
+    if (this.el?.primaryTime) this.el.primaryTime.textContent = "00:00";
+  }
+
   showTab(name) {
+    // Si on quitte le runner, on coupe tout (timers + bips)
+    const currentRunnerActive = this.root
+      .querySelector('.view[data-view="runner"]')
+      ?.classList.contains("is-active");
+    if (currentRunnerActive && name !== "runner") {
+      this.forceStopAll();
+    }
+
     this.root
       .querySelectorAll(".tab")
       .forEach((t) => t.classList.toggle("is-active", t.dataset.tab === name));
@@ -1047,7 +1079,7 @@ export class UI {
     this.renderStep();
     this.maybeAutoStart(); // si autoRun actif, repart sur une étape "timée"
   }
-  
+
   maybeAutoStart() {
     if (!this.autoRun) return;
     if (this.isPaused) return;
