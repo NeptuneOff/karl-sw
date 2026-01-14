@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Workouts</title>
+  <link rel="stylesheet" href="./workouts.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <span>Workouts</span>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Navigation Workouts">
+        <button class="tab is-active" data-tab="library" role="tab" aria-selected="true">Bibliothèque</button>
+        <button class="tab" data-tab="editor" role="tab" aria-selected="false" disabled>Éditeur</button>
+        <button class="tab" data-tab="runner" role="tab" aria-selected="false" disabled>Exécution</button>
+      </nav>
+
+      <div class="actions">
+        <button class="btn btn-ghost" id="btnExport" title="Exporter JSON">Export</button>
+        <label class="btn btn-ghost filelike" title="Importer JSON">
+          Import
+          <input type="file" id="fileImport" accept="application/json" />
+        </label>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- LIBRARY -->
+      <section class="view is-active" data-view="library">
+        <div class="panel">
+          <div class="panel-header">
+            <h1>Mes séances</h1>
+            <div class="row gap">
+              <button class="btn" id="btnNewWorkout">Nouvelle séance</button>
+              <button class="btn btn-ghost" id="btnSeedDemo">Démo</button>
+            </div>
+          </div>
+
+          <div class="grid" id="workoutGrid"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Détails</h2>
+          </div>
+          <div class="empty" id="workoutDetailsEmpty">
+            Sélectionne une séance pour voir le détail, l’éditer ou la lancer.
+          </div>
+          <div class="details" id="workoutDetails" hidden></div>
+        </div>
+      </section>
+
+      <!-- EDITOR -->
+      <section class="view" data-view="editor">
+        <div class="split">
+          <div class="panel">
+            <div class="panel-header">
+              <h1 id="editorTitle">Éditeur</h1>
+              <div class="row gap">
+                <button class="btn btn-ghost" id="btnBackToLibrary1">← Bibliothèque</button>
+                <button class="btn" id="btnSaveWorkout">Sauvegarder</button>
+              </div>
+            </div>
+
+            <div class="tree-toolbar">
+              <button class="btn btn-ghost" id="btnAddBlock">+ Bloc</button>
+              <button class="btn btn-ghost" id="btnAddEmom">+ EMOM</button>
+              <button class="btn btn-ghost" id="btnAddExercise">+ Exercice</button>
+              <button class="btn btn-danger" id="btnDeleteNode" disabled>Supprimer</button>
+            </div>
+
+            <div class="tree" id="tree"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Propriétés</h2>
+            </div>
+
+            <div class="props" id="props">
+              <div class="empty">Sélectionne un bloc ou un exercice dans l’arborescence.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RUNNER -->
+      <section class="view" data-view="runner">
+        <div class="panel runner">
+          <div class="runner-top">
+            <div class="runner-meta">
+              <div class="runner-title" id="runTitle">Séance</div>
+              <div class="runner-sub" id="runSub">0 étapes</div>
+            </div>
+
+            <div class="runner-global">
+              <div class="label">Chrono global</div>
+              <div class="time" id="globalTime">00:00</div>
+            </div>
+
+            <div class="runner-controls">
+              <button class="btn btn-ghost" id="btnBackToLibrary2">← Bibliothèque</button>
+              <button class="btn btn-danger" id="btnStop">STOP</button>
+            </div>
+          </div>
+
+          <div class="runner-body">
+            <div class="card current">
+              <div class="card-head">
+                <div class="badge" id="stepBadge">Étape</div>
+                <div class="step-title" id="stepTitle">—</div>
+              </div>
+
+              <div class="step-desc" id="stepDesc" hidden></div>
+
+              <div class="timers">
+                <div class="timer">
+                  <div class="label" id="primaryLabel">Timer</div>
+                  <div class="time big" id="primaryTime">00:00</div>
+                </div>
+                <div class="timer">
+                  <div class="label">Progression</div>
+                  <div class="time" id="progressText">0 / 0</div>
+                </div>
+              </div>
+
+              <div class="runner-buttons">
+                <button class="btn" id="btnStartStep">Démarrer</button>
+                <button class="btn btn-ghost" id="btnRestartStep">Recommencer</button>
+                <button class="btn btn-ghost" id="btnSkipStep">Passer</button>
+                <button class="btn btn-ghost" id="btnToggleDesc">Description</button>
+              </div>
+
+              <div class="hint" id="hintText">Décompte 5s avant lancement du timer.</div>
+            </div>
+
+            <div class="card queue">
+              <div class="card-head">
+                <div class="badge">À venir</div>
+                <div class="step-title">Timeline</div>
+              </div>
+              <div class="queue-list" id="queueList"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- TOASTS -->
+    <div class="toasts" id="toastHost" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- OVERLAY (validation / formulaires in-app) -->
+    <div class="overlay" id="overlay" hidden>
+      <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="ovTitle">
+        <div class="overlay-head">
+          <div class="overlay-title" id="ovTitle">—</div>
+          <button class="iconbtn" id="ovClose" title="Fermer">✕</button>
+        </div>
+        <div class="overlay-body" id="ovBody"></div>
+        <div class="overlay-actions" id="ovActions"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./workouts.js"></script>
+</body>
+</html>
