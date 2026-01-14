@@ -1,15 +1,23 @@
-import { createBlock, createExercise, defaultSetHold, defaultSetReps } from "./model.js";
+import {
+  createBlock,
+  createExercise,
+  defaultSetHold,
+  defaultSetReps,
+} from "./model.js";
 import { flattenWorkout } from "./flatten.js";
 import { Countdown, fmtTime, IntervalTimer } from "./timers.js";
 import { beep, tripleBeep } from "./audio.js";
 import { requestWakeLock, releaseWakeLock } from "./wake.js";
 
-export class UI{
-  constructor(store){
+export class UI {
+  constructor(store) {
     this.store = store;
     this.state = [];
     this.selectedWorkoutId = null;
     this.currentWorkout = null;
+
+    this.autoRun = false; // enchaînement auto activé
+    this.isPaused = false; // pause volontaire
 
     // editor selection
     this.selectedNodeId = null;
@@ -29,11 +37,11 @@ export class UI{
     this._toastId = 0;
   }
 
-  mount(root){
+  mount(root) {
     this.root = root;
 
     // tabs
-    root.querySelectorAll(".tab").forEach(btn => {
+    root.querySelectorAll(".tab").forEach((btn) => {
       btn.addEventListener("click", () => this.showTab(btn.dataset.tab));
     });
 
@@ -48,13 +56,25 @@ export class UI{
     this.el.props = root.querySelector("#props");
     this.el.btnDeleteNode = root.querySelector("#btnDeleteNode");
 
-    root.querySelector("#btnBackToLibrary1").addEventListener("click", () => this.goLibrary());
-    root.querySelector("#btnSaveWorkout").addEventListener("click", () => this.saveWorkout());
+    root
+      .querySelector("#btnBackToLibrary1")
+      .addEventListener("click", () => this.goLibrary());
+    root
+      .querySelector("#btnSaveWorkout")
+      .addEventListener("click", () => this.saveWorkout());
 
-    root.querySelector("#btnAddBlock").addEventListener("click", () => this.addNode("block"));
-    root.querySelector("#btnAddEmom").addEventListener("click", () => this.addNode("emom"));
-    root.querySelector("#btnAddExercise").addEventListener("click", () => this.addNode("exercise"));
-    root.querySelector("#btnDeleteNode").addEventListener("click", () => this.deleteSelectedNode());
+    root
+      .querySelector("#btnAddBlock")
+      .addEventListener("click", () => this.addNode("block"));
+    root
+      .querySelector("#btnAddEmom")
+      .addEventListener("click", () => this.addNode("emom"));
+    root
+      .querySelector("#btnAddExercise")
+      .addEventListener("click", () => this.addNode("exercise"));
+    root
+      .querySelector("#btnDeleteNode")
+      .addEventListener("click", () => this.deleteSelectedNode());
 
     // runner elements
     this.el.runTitle = root.querySelector("#runTitle");
@@ -69,16 +89,24 @@ export class UI{
     this.el.queueList = root.querySelector("#queueList");
     this.el.hint = root.querySelector("#hintText");
 
-    root.querySelector("#btnBackToLibrary2").addEventListener("click", () => this.stopAndReturn());
+    root
+      .querySelector("#btnBackToLibrary2")
+      .addEventListener("click", () => this.stopAndReturn());
 
     this.el.btnStartStep = root.querySelector("#btnStartStep");
     this.el.btnRestartStep = root.querySelector("#btnRestartStep");
+    this.el.btnPrevStep = root.querySelector("#btnPrevStep");
     this.el.btnSkipStep = root.querySelector("#btnSkipStep");
     this.el.btnToggleDesc = root.querySelector("#btnToggleDesc");
     this.el.btnStop = root.querySelector("#btnStop");
 
-    this.el.btnStartStep.addEventListener("click", () => this.startCurrentStep());
-    this.el.btnRestartStep.addEventListener("click", () => this.restartCurrentStep());
+    this.el.btnStartStep.addEventListener("click", () =>
+      this.startCurrentStep()
+    );
+    this.el.btnRestartStep.addEventListener("click", () =>
+      this.restartCurrentStep()
+    );
+    this.el.btnPrevStep.addEventListener("click", () => this.prevStep());
     this.el.btnSkipStep.addEventListener("click", () => this.skipStep());
     this.el.btnToggleDesc.addEventListener("click", () => this.toggleDesc());
 
@@ -92,10 +120,11 @@ export class UI{
 
     this.el.ovClose.addEventListener("click", () => this.closeOverlay(null));
     this.el.overlay.addEventListener("click", (e) => {
-      if(e.target === this.el.overlay) this.closeOverlay(null);
+      if (e.target === this.el.overlay) this.closeOverlay(null);
     });
     window.addEventListener("keydown", (e) => {
-      if(e.key === "Escape" && !this.el.overlay.hidden) this.closeOverlay(null);
+      if (e.key === "Escape" && !this.el.overlay.hidden)
+        this.closeOverlay(null);
     });
 
     // STOP: maintenir puis overlay confirm
@@ -104,29 +133,30 @@ export class UI{
       this.stopHold.armed = false;
       this.el.btnStop.textContent = "STOP (maintenir)";
       const tick = () => {
-        if(this.stopHold.downAt === 0) return;
+        if (this.stopHold.downAt === 0) return;
         const dt = performance.now() - this.stopHold.downAt;
-        if(dt >= 1200 && !this.stopHold.armed){
+        if (dt >= 1200 && !this.stopHold.armed) {
           this.stopHold.armed = true;
           this.el.btnStop.textContent = "STOP (ok)";
           beep(660, 120, 0.07);
 
           this.openConfirm({
             title: "Arrêter la séance ?",
-            message: "Double validation anti-erreur. Si tu confirmes, le chrono global s'arrête.",
+            message:
+              "Double validation anti-erreur. Si tu confirmes, le chrono global s'arrête.",
             confirmText: "Arrêter",
             cancelText: "Annuler",
-            danger: true
+            danger: true,
           }).then((ok) => {
             this.el.btnStop.textContent = "STOP";
             this.stopHold.downAt = 0;
-            if(ok){
+            if (ok) {
               this.stopRunner(true);
               this.goLibrary();
-              this.toast("Séance arrêtée", "", { danger:true });
+              this.toast("Séance arrêtée", "", { danger: true });
             }
           });
-        }else{
+        } else {
           requestAnimationFrame(tick);
         }
       };
@@ -143,26 +173,34 @@ export class UI{
     });
   }
 
-  setState(list){
+  setState(list) {
     this.state = list;
     this.renderLibrary();
     this.updateTabs();
   }
 
-  updateTabs(){
+  updateTabs() {
     const editorTab = this.root.querySelector('.tab[data-tab="editor"]');
     const runnerTab = this.root.querySelector('.tab[data-tab="runner"]');
     editorTab.disabled = !this.currentWorkout;
     runnerTab.disabled = !this.currentWorkout;
   }
 
-  showTab(name){
-    this.root.querySelectorAll(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.tab === name));
-    this.root.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
-    this.root.querySelectorAll(".view").forEach(v => v.classList.toggle("is-active", v.dataset.view === name));
+  showTab(name) {
+    this.root
+      .querySelectorAll(".tab")
+      .forEach((t) => t.classList.toggle("is-active", t.dataset.tab === name));
+    this.root
+      .querySelectorAll(".tab")
+      .forEach((t) =>
+        t.setAttribute("aria-selected", String(t.dataset.tab === name))
+      );
+    this.root
+      .querySelectorAll(".view")
+      .forEach((v) => v.classList.toggle("is-active", v.dataset.view === name));
   }
 
-  goLibrary(){
+  goLibrary() {
     this.currentWorkout = null;
     this.selectedNodeId = null;
     this.updateTabs();
@@ -170,17 +208,17 @@ export class UI{
     this.renderLibrary();
   }
 
-  selectWorkout(id){
+  selectWorkout(id) {
     this.selectedWorkoutId = id;
-    const w = this.state.find(x => x.id === id) || null;
+    const w = this.state.find((x) => x.id === id) || null;
     this.renderLibraryDetails(w);
   }
 
-  renderLibrary(){
+  renderLibrary() {
     const grid = this.el.grid;
     grid.innerHTML = "";
 
-    for(const w of this.state){
+    for (const w of this.state) {
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
@@ -188,15 +226,17 @@ export class UI{
           <div class="badge">Séance</div>
           <div class="step-title">${escapeHtml(w.title)}</div>
         </div>
-        <div class="small">Maj: ${escapeHtml((w.updatedAt || "").slice(0,16).replace("T"," "))}</div>
+        <div class="small">Maj: ${escapeHtml(
+          (w.updatedAt || "").slice(0, 16).replace("T", " ")
+        )}</div>
       `;
       card.addEventListener("click", () => this.selectWorkout(w.id));
       grid.appendChild(card);
     }
   }
 
-  renderLibraryDetails(workout){
-    if(!workout){
+  renderLibraryDetails(workout) {
+    if (!workout) {
       this.el.detailsEmpty.hidden = false;
       this.el.details.hidden = true;
       return;
@@ -218,12 +258,14 @@ export class UI{
       </div>
     `;
 
-    this.el.details.querySelector("#btnLaunch").addEventListener("click", () => {
-      this.currentWorkout = structuredClone(workout);
-      this.startRunner();
-      this.updateTabs();
-      this.showTab("runner");
-    });
+    this.el.details
+      .querySelector("#btnLaunch")
+      .addEventListener("click", () => {
+        this.currentWorkout = structuredClone(workout);
+        this.startRunner();
+        this.updateTabs();
+        this.showTab("runner");
+      });
 
     this.el.details.querySelector("#btnEdit").addEventListener("click", () => {
       this.currentWorkout = structuredClone(workout);
@@ -233,25 +275,27 @@ export class UI{
       this.renderEditor();
     });
 
-    this.el.details.querySelector("#btnDeleteWorkout").addEventListener("click", async () => {
-      const ok = await this.openConfirm({
-        title: "Supprimer la séance ?",
-        message: `Cette action est irréversible.\n\nSéance: ${workout.title}`,
-        confirmText: "Supprimer",
-        cancelText: "Annuler",
-        danger: true
-      });
-      if(!ok) return;
+    this.el.details
+      .querySelector("#btnDeleteWorkout")
+      .addEventListener("click", async () => {
+        const ok = await this.openConfirm({
+          title: "Supprimer la séance ?",
+          message: `Cette action est irréversible.\n\nSéance: ${workout.title}`,
+          confirmText: "Supprimer",
+          cancelText: "Annuler",
+          danger: true,
+        });
+        if (!ok) return;
 
-      this.store.remove(workout.id);
-      this.setState(this.store.loadAll());
-      this.renderLibraryDetails(null);
-      this.toast("Séance supprimée", workout.title, { danger:true });
-    });
+        this.store.remove(workout.id);
+        this.setState(this.store.loadAll());
+        this.renderLibraryDetails(null);
+        this.toast("Séance supprimée", workout.title, { danger: true });
+      });
   }
 
-  saveWorkout(){
-    if(!this.currentWorkout) return;
+  saveWorkout() {
+    if (!this.currentWorkout) return;
     this.currentWorkout.updatedAt = new Date().toISOString();
     this.store.upsert(this.currentWorkout);
     this.setState(this.store.loadAll());
@@ -261,29 +305,30 @@ export class UI{
   // -------------------------
   // EDITOR
   // -------------------------
-  renderEditor(){
-    if(!this.currentWorkout) return;
+  renderEditor() {
+    if (!this.currentWorkout) return;
     this.el.editorTitle.textContent = `Éditeur — ${this.currentWorkout.title}`;
     this.renderTree();
     this.renderProps();
   }
 
-  renderTree(){
+  renderTree() {
     const root = this.currentWorkout.root;
     this.el.tree.innerHTML = "";
     const nodeEl = this.renderNodeRecursive(root, null);
     this.el.tree.appendChild(nodeEl);
   }
 
-  renderNodeRecursive(node, parent){
+  renderNodeRecursive(node, parent) {
     const wrap = document.createElement("div");
 
     const row = document.createElement("div");
-    row.className = "node" + (node.id === this.selectedNodeId ? " is-selected" : "");
+    row.className =
+      "node" + (node.id === this.selectedNodeId ? " is-selected" : "");
     row.addEventListener("click", (e) => {
       e.stopPropagation();
       this.selectedNodeId = node.id;
-      this.el.btnDeleteNode.disabled = (node.id === this.currentWorkout.root.id);
+      this.el.btnDeleteNode.disabled = node.id === this.currentWorkout.root.id;
       this.renderEditor();
     });
 
@@ -292,36 +337,44 @@ export class UI{
 
     const type = document.createElement("div");
     type.className = "node-type";
-    type.textContent = node.type === "block" ? (node.kind === "emom" ? "E" : "B") : "X";
+    type.textContent =
+      node.type === "block" ? (node.kind === "emom" ? "E" : "B") : "X";
 
     const title = document.createElement("div");
     const subtitle = document.createElement("div");
     subtitle.className = "node-sub";
 
-    if(node.type === "block"){
+    if (node.type === "block") {
       title.className = "node-title";
       title.textContent = node.title;
       const tail = [];
-      if((node.restEndSec || 0) > 0) tail.push(`rest fin: ${node.restEndSec}s`);
-      if(node.kind === "emom") tail.push(`EMOM: ${node.emom?.rounds || 0}x${node.emom?.intervalSec || 0}s`);
+      if ((node.restEndSec || 0) > 0)
+        tail.push(`rest fin: ${node.restEndSec}s`);
+      if (node.kind === "emom")
+        tail.push(
+          `EMOM: ${node.emom?.rounds || 0}x${node.emom?.intervalSec || 0}s`
+        );
       subtitle.textContent = tail.join(" • ");
-    }else{
+    } else {
       title.className = "node-title";
       title.textContent = node.name;
       const sets = Array.isArray(node.sets) ? node.sets.length : 0;
       subtitle.textContent = `${sets} série(s)`;
     }
 
-    left.append(type, (()=>{
-      const t = document.createElement("div");
-      t.append(title, subtitle);
-      return t;
-    })());
+    left.append(
+      type,
+      (() => {
+        const t = document.createElement("div");
+        t.append(title, subtitle);
+        return t;
+      })()
+    );
 
     const actions = document.createElement("div");
     actions.className = "node-actions";
 
-    if(parent){
+    if (parent) {
       const up = document.createElement("button");
       up.className = "iconbtn";
       up.textContent = "↑";
@@ -346,10 +399,10 @@ export class UI{
     row.append(left, actions);
     wrap.appendChild(row);
 
-    if(node.type === "block" && (node.nodes?.length || 0) > 0){
+    if (node.type === "block" && (node.nodes?.length || 0) > 0) {
       const children = document.createElement("div");
       children.className = "children";
-      for(const child of node.nodes){
+      for (const child of node.nodes) {
         children.appendChild(this.renderNodeRecursive(child, node));
       }
       wrap.appendChild(children);
@@ -358,83 +411,95 @@ export class UI{
     return wrap;
   }
 
-  findNodeById(node, id, parent=null){
-    if(node.id === id) return { node, parent };
-    if(node.type === "block"){
-      for(const child of node.nodes || []){
+  findNodeById(node, id, parent = null) {
+    if (node.id === id) return { node, parent };
+    if (node.type === "block") {
+      for (const child of node.nodes || []) {
         const res = this.findNodeById(child, id, node);
-        if(res) return res;
+        if (res) return res;
       }
     }
     return null;
   }
 
-  async addNode(kind){
-    if(!this.currentWorkout) return;
+  async addNode(kind) {
+    if (!this.currentWorkout) return;
     const root = this.currentWorkout.root;
     const selected = this.findNodeById(root, this.selectedNodeId || root.id);
-    const target = selected?.node?.type === "block" ? selected.node : selected?.parent || root;
+    const target =
+      selected?.node?.type === "block"
+        ? selected.node
+        : selected?.parent || root;
 
     // UX: pas de popup. On crée direct avec un nom par défaut, renommage dans "Propriétés".
     // Option: si tu veux forcer le nom à la création, décommente la version openForm ci-dessous.
-    if(kind === "block"){
-      const b = createBlock("Bloc", { kind:"block", restEndSec: 0 });
+    if (kind === "block") {
+      const b = createBlock("Bloc", { kind: "block", restEndSec: 0 });
       target.nodes.push(b);
       this.toast("Bloc ajouté", "Renomme-le dans Propriétés.");
-    }else if(kind === "emom"){
-      const b = createBlock("EMOM", { kind:"emom", restEndSec: 0 });
+    } else if (kind === "emom") {
+      const b = createBlock("EMOM", { kind: "emom", restEndSec: 0 });
       b.emom.intervalSec = 60;
       b.emom.rounds = 10;
       target.nodes.push(b);
-      this.toast("EMOM ajouté", "Configure intervalle + rounds dans Propriétés.");
-    }else if(kind === "exercise"){
+      this.toast(
+        "EMOM ajouté",
+        "Configure intervalle + rounds dans Propriétés."
+      );
+    } else if (kind === "exercise") {
       const ex = createExercise("Exercice");
       target.nodes.push(ex);
-      this.toast("Exercice ajouté", "Renomme-le et configure les séries dans Propriétés.");
+      this.toast(
+        "Exercice ajouté",
+        "Renomme-le et configure les séries dans Propriétés."
+      );
     }
 
     this.currentWorkout.updatedAt = new Date().toISOString();
     this.renderEditor();
   }
 
-  async deleteSelectedNode(){
-    if(!this.currentWorkout || !this.selectedNodeId) return;
+  async deleteSelectedNode() {
+    if (!this.currentWorkout || !this.selectedNodeId) return;
     const root = this.currentWorkout.root;
-    if(this.selectedNodeId === root.id) return;
+    if (this.selectedNodeId === root.id) return;
 
     const found = this.findNodeById(root, this.selectedNodeId);
-    if(!found || !found.parent) return;
+    if (!found || !found.parent) return;
 
-    const label = found.node.type === "block"
-      ? `Bloc: ${found.node.title}`
-      : `Exercice: ${found.node.name}`;
+    const label =
+      found.node.type === "block"
+        ? `Bloc: ${found.node.title}`
+        : `Exercice: ${found.node.name}`;
 
     const ok = await this.openConfirm({
       title: "Supprimer ce nœud ?",
       message: `Cela supprime aussi tous ses enfants.\n\n${label}`,
       confirmText: "Supprimer",
       cancelText: "Annuler",
-      danger: true
+      danger: true,
     });
-    if(!ok) return;
+    if (!ok) return;
 
-    found.parent.nodes = found.parent.nodes.filter(n => n.id !== this.selectedNodeId);
+    found.parent.nodes = found.parent.nodes.filter(
+      (n) => n.id !== this.selectedNodeId
+    );
     this.selectedNodeId = root.id;
     this.el.btnDeleteNode.disabled = true;
     this.currentWorkout.updatedAt = new Date().toISOString();
     this.renderEditor();
-    this.toast("Nœud supprimé", label, { danger:true });
+    this.toast("Nœud supprimé", label, { danger: true });
   }
 
-  moveNode(parentId, nodeId, delta){
+  moveNode(parentId, nodeId, delta) {
     const root = this.currentWorkout.root;
     const parentFound = this.findNodeById(root, parentId);
-    if(!parentFound || parentFound.node.type !== "block") return;
+    if (!parentFound || parentFound.node.type !== "block") return;
     const arr = parentFound.node.nodes;
-    const idx = arr.findIndex(n => n.id === nodeId);
-    if(idx < 0) return;
+    const idx = arr.findIndex((n) => n.id === nodeId);
+    if (idx < 0) return;
     const next = idx + delta;
-    if(next < 0 || next >= arr.length) return;
+    if (next < 0 || next >= arr.length) return;
     const tmp = arr[idx];
     arr[idx] = arr[next];
     arr[next] = tmp;
@@ -442,17 +507,17 @@ export class UI{
     this.renderEditor();
   }
 
-  renderProps(){
-    if(!this.currentWorkout) return;
+  renderProps() {
+    if (!this.currentWorkout) return;
     const root = this.currentWorkout.root;
     const found = this.findNodeById(root, this.selectedNodeId || root.id);
     const node = found?.node;
-    if(!node){
+    if (!node) {
       this.el.props.innerHTML = `<div class="empty">Sélection invalide.</div>`;
       return;
     }
 
-    if(node.type === "block"){
+    if (node.type === "block") {
       this.el.props.innerHTML = `
         <div class="field">
           <label>Titre</label>
@@ -461,21 +526,31 @@ export class UI{
 
         <div class="field">
           <label>Repos fin de bloc (sec)</label>
-          <input id="p_restEnd" type="number" min="0" step="5" value="${Number(node.restEndSec || 0)}" />
+          <input id="p_restEnd" type="number" min="0" step="5" value="${Number(
+            node.restEndSec || 0
+          )}" />
         </div>
 
-        ${node.kind === "emom" ? `
+        ${
+          node.kind === "emom"
+            ? `
           <div class="hr"></div>
           <div class="field">
             <label>EMOM — Intervalle (sec)</label>
-            <input id="p_emomInterval" type="number" min="10" step="5" value="${Number(node.emom?.intervalSec || 60)}" />
+            <input id="p_emomInterval" type="number" min="10" step="5" value="${Number(
+              node.emom?.intervalSec || 60
+            )}" />
             <div class="mini">Le runner attend la fin de l’interval après les exos.</div>
           </div>
           <div class="field">
             <label>EMOM — Rounds</label>
-            <input id="p_emomRounds" type="number" min="1" step="1" value="${Number(node.emom?.rounds || 10)}" />
+            <input id="p_emomRounds" type="number" min="1" step="1" value="${Number(
+              node.emom?.rounds || 10
+            )}" />
           </div>
-        ` : ``}
+        `
+            : ``
+        }
       `;
 
       this.el.props.querySelector("#p_title").addEventListener("input", (e) => {
@@ -483,23 +558,29 @@ export class UI{
         this.currentWorkout.updatedAt = new Date().toISOString();
         this.renderTree();
       });
-      this.el.props.querySelector("#p_restEnd").addEventListener("input", (e) => {
-        node.restEndSec = clampInt(e.target.value, 0, 99999);
-        this.currentWorkout.updatedAt = new Date().toISOString();
-        this.renderTree();
-      });
+      this.el.props
+        .querySelector("#p_restEnd")
+        .addEventListener("input", (e) => {
+          node.restEndSec = clampInt(e.target.value, 0, 99999);
+          this.currentWorkout.updatedAt = new Date().toISOString();
+          this.renderTree();
+        });
 
-      if(node.kind === "emom"){
-        this.el.props.querySelector("#p_emomInterval").addEventListener("input", (e) => {
-          node.emom.intervalSec = clampInt(e.target.value, 10, 9999);
-          this.currentWorkout.updatedAt = new Date().toISOString();
-          this.renderTree();
-        });
-        this.el.props.querySelector("#p_emomRounds").addEventListener("input", (e) => {
-          node.emom.rounds = clampInt(e.target.value, 1, 9999);
-          this.currentWorkout.updatedAt = new Date().toISOString();
-          this.renderTree();
-        });
+      if (node.kind === "emom") {
+        this.el.props
+          .querySelector("#p_emomInterval")
+          .addEventListener("input", (e) => {
+            node.emom.intervalSec = clampInt(e.target.value, 10, 9999);
+            this.currentWorkout.updatedAt = new Date().toISOString();
+            this.renderTree();
+          });
+        this.el.props
+          .querySelector("#p_emomRounds")
+          .addEventListener("input", (e) => {
+            node.emom.rounds = clampInt(e.target.value, 1, 9999);
+            this.currentWorkout.updatedAt = new Date().toISOString();
+            this.renderTree();
+          });
       }
       return;
     }
@@ -549,22 +630,32 @@ export class UI{
         const kind = s.work?.kind || "hold";
         const kindSel = document.createElement("select");
         kindSel.innerHTML = `
-          <option value="hold" ${kind==="hold" ? "selected":""}>Hold</option>
-          <option value="reps" ${kind==="reps" ? "selected":""}>Reps</option>
+          <option value="hold" ${
+            kind === "hold" ? "selected" : ""
+          }>Hold</option>
+          <option value="reps" ${
+            kind === "reps" ? "selected" : ""
+          }>Reps</option>
         `;
 
         const v1 = document.createElement("input");
-        v1.type = "number"; v1.min = "0"; v1.step = "1";
+        v1.type = "number";
+        v1.min = "0";
+        v1.step = "1";
         const v2 = document.createElement("input");
-        v2.type = "number"; v2.min = "0"; v2.step = "1";
+        v2.type = "number";
+        v2.min = "0";
+        v2.step = "1";
         const rest = document.createElement("input");
-        rest.type = "number"; rest.min = "0"; rest.step = "5";
+        rest.type = "number";
+        rest.min = "0";
+        rest.step = "5";
 
-        if(kind === "hold"){
+        if (kind === "hold") {
           v1.value = Number(s.work?.seconds || 0);
           v2.value = 0;
           v2.disabled = true;
-        }else{
+        } else {
           v1.value = Number(s.work?.reps || 0);
           v2.value = Number(s.work?.capSec || 0);
           v2.disabled = false;
@@ -577,11 +668,16 @@ export class UI{
         del.title = "Supprimer la série";
 
         kindSel.addEventListener("change", () => {
-          if(kindSel.value === "hold"){
-            s.work = { kind:"hold", seconds: clampInt(v1.value,0,9999) };
-            v2.disabled = true; v2.value = 0;
-          }else{
-            s.work = { kind:"reps", reps: clampInt(v1.value,0,9999), capSec: clampInt(v2.value,0,9999) };
+          if (kindSel.value === "hold") {
+            s.work = { kind: "hold", seconds: clampInt(v1.value, 0, 9999) };
+            v2.disabled = true;
+            v2.value = 0;
+          } else {
+            s.work = {
+              kind: "reps",
+              reps: clampInt(v1.value, 0, 9999),
+              capSec: clampInt(v2.value, 0, 9999),
+            };
             v2.disabled = false;
           }
           this.currentWorkout.updatedAt = new Date().toISOString();
@@ -590,25 +686,27 @@ export class UI{
         });
 
         v1.addEventListener("input", () => {
-          if(s.work.kind === "hold") s.work.seconds = clampInt(v1.value,0,9999);
-          else s.work.reps = clampInt(v1.value,0,9999);
+          if (s.work.kind === "hold")
+            s.work.seconds = clampInt(v1.value, 0, 9999);
+          else s.work.reps = clampInt(v1.value, 0, 9999);
           this.currentWorkout.updatedAt = new Date().toISOString();
           this.renderTree();
         });
 
         v2.addEventListener("input", () => {
-          if(s.work.kind === "reps") s.work.capSec = clampInt(v2.value,0,9999);
+          if (s.work.kind === "reps")
+            s.work.capSec = clampInt(v2.value, 0, 9999);
           this.currentWorkout.updatedAt = new Date().toISOString();
         });
 
         rest.addEventListener("input", () => {
-          s.restSec = clampInt(rest.value,0,99999);
+          s.restSec = clampInt(rest.value, 0, 99999);
           this.currentWorkout.updatedAt = new Date().toISOString();
         });
 
         del.addEventListener("click", () => {
-          sets.splice(i,1);
-          if(sets.length === 0){
+          sets.splice(i, 1);
+          if (sets.length === 0) {
             sets.push(defaultSetHold(10, 60));
           }
           node.sets = sets;
@@ -644,8 +742,8 @@ export class UI{
   // -------------------------
   // RUNNER
   // -------------------------
-  async startRunner(){
-    if(!this.currentWorkout) return;
+  async startRunner() {
+    if (!this.currentWorkout) return;
 
     this.steps = flattenWorkout(this.currentWorkout);
     this.stepIndex = 0;
@@ -657,7 +755,7 @@ export class UI{
 
     this.globalTimer?.stop?.();
     this.globalTimer = new IntervalTimer((ms) => {
-      this.el.globalTime.textContent = fmtTime(ms/1000);
+      this.el.globalTime.textContent = fmtTime(ms / 1000);
     });
     this.globalTimer.reset();
     this.globalTimer.start();
@@ -665,14 +763,21 @@ export class UI{
     await requestWakeLock();
 
     this.stepMode = "idle";
+    this.autoRun = false; // autoRun démarre quand tu lances la 1ère étape
+    this.isPaused = false;
+
     this.renderStep();
   }
 
-  renderQueue(){
+  renderQueue() {
     const list = this.el.queueList;
     list.innerHTML = "";
     const max = 12;
-    for(let i=this.stepIndex; i<Math.min(this.steps.length, this.stepIndex+max); i++){
+    for (
+      let i = this.stepIndex;
+      i < Math.min(this.steps.length, this.stepIndex + max);
+      i++
+    ) {
       const s = this.steps[i];
       const item = document.createElement("div");
       item.className = "queue-item";
@@ -684,9 +789,10 @@ export class UI{
     }
   }
 
-  renderStep(){
+  renderStep() {
     const s = this.steps[this.stepIndex];
-    if(!s){
+    if (this.el.btnPrevStep) this.el.btnPrevStep.disabled = this.stepIndex <= 0;
+    if (!s) {
       tripleBeep();
       this.el.stepBadge.textContent = "TERMINÉ";
       this.el.stepTitle.textContent = "Séance terminée";
@@ -708,19 +814,23 @@ export class UI{
     this.el.stepTitle.textContent = s.title;
     const p = (s.path || []).join(" › ");
     this.el.stepBadge.textContent = s.type.replaceAll("_", " ").toUpperCase();
-    this.el.progressText.textContent = `${this.stepIndex + 1} / ${this.steps.length}`;
+    this.el.progressText.textContent = `${this.stepIndex + 1} / ${
+      this.steps.length
+    }`;
 
-    if(s.type === "exercise_set"){
+    if (s.type === "exercise_set") {
       const setLabel = `Série ${s.setIndex + 1}/${s.setCount}`;
-      const w = s.work || { kind:"reps", reps: 10, capSec: 0 };
-      this.el.primaryLabel.textContent = `${setLabel} — ${w.kind === "hold" ? `${w.seconds}s hold` : `${w.reps} reps`}`;
-    }else if(s.type === "rest" || s.type === "block_rest"){
+      const w = s.work || { kind: "reps", reps: 10, capSec: 0 };
+      this.el.primaryLabel.textContent = `${setLabel} — ${
+        w.kind === "hold" ? `${w.seconds}s hold` : `${w.reps} reps`
+      }`;
+    } else if (s.type === "rest" || s.type === "block_rest") {
       this.el.primaryLabel.textContent = `Repos — ${s.seconds}s`;
-    }else if(s.type === "emom_round_start"){
+    } else if (s.type === "emom_round_start") {
       this.el.primaryLabel.textContent = `Round ${s.round}/${s.rounds} — interval ${s.intervalSec}s`;
-    }else if(s.type === "emom_round_end_wait"){
+    } else if (s.type === "emom_round_end_wait") {
       this.el.primaryLabel.textContent = `Attente fin interval ${s.intervalSec}s`;
-    }else{
+    } else {
       this.el.primaryLabel.textContent = "Étape";
     }
 
@@ -728,63 +838,107 @@ export class UI{
     this.el.stepDesc.hidden = true;
 
     this.el.primaryTime.textContent = "00:00";
-    this.el.hint.textContent = p ? `Chemin: ${p}` : "Décompte 5s avant lancement du timer.";
+    this.el.hint.textContent = p
+      ? `Chemin: ${p}`
+      : "Décompte 5s avant lancement du timer.";
     this.el.btnStartStep.textContent = "Démarrer";
 
+    this.maybeAutoStart();
     this.renderQueue();
   }
 
-  toggleDesc(){
+  toggleDesc() {
     const s = this.steps[this.stepIndex];
-    if(!s || !s.description) return;
+    if (!s || !s.description) return;
     this.el.stepDesc.hidden = !this.el.stepDesc.hidden;
   }
 
-  startCurrentStep(){
+  startCurrentStep(fromAuto = false) {
     const s = this.steps[this.stepIndex];
-    if(!s) return;
+    if (!s) return;
 
-    if(s.type === "emom_round_start"){
+    // 1) Si l’utilisateur clique pendant qu’un timer tourne => PAUSE
+    if (this.stepMode === "work" || this.stepMode === "countdown") {
+      // pause volontaire
+      this.isPaused = true;
+      this.autoRun = true; // garde l’autoRun, mais en pause
+      this.clearStepRuntime();
+      this.el.btnStartStep.textContent = "Reprendre";
+      this.el.hint.textContent = "Pause. Clique Reprendre pour continuer.";
+      return;
+    }
+
+    // 2) Si on est en pause et qu’il clique => RESUME + auto
+    if (this.isPaused && !fromAuto) {
+      this.isPaused = false;
+      this.autoRun = true;
+      this.el.btnStartStep.textContent = "Pause";
+      this.maybeAutoStart();
+      return;
+    }
+
+    // 3) Premier démarrage manuel => autoRun ON
+    if (!fromAuto) {
+      this.autoRun = true;
+      this.isPaused = false;
+      this.el.btnStartStep.textContent = "Pause";
+    }
+
+    if (s.type === "emom_round_start") {
       this.emomRoundStartAt.set(this.stepIndex, performance.now());
       beep(520, 100, 0.07);
       this.nextStep();
       return;
     }
 
-    if(s.type === "emom_round_end_wait"){
+    if (s.type === "emom_round_end_wait") {
       const startIdx = s.dependsOnRoundStartIndex;
       const t0 = this.emomRoundStartAt.get(startIdx);
-      if(!t0){
+      if (!t0) {
         this.nextStep();
         return;
       }
       const elapsed = (performance.now() - t0) / 1000;
       const remaining = Math.max(0, Math.ceil(s.intervalSec - elapsed));
-      if(remaining <= 0){
+      if (remaining <= 0) {
         tripleBeep();
         this.nextStep();
         return;
       }
-      this.runCountdownThenTimer(remaining, { label: "Attente", autoAdvance: true, noPrep: true });
+      this.runCountdownThenTimer(remaining, {
+        label: "Attente",
+        autoAdvance: true,
+        noPrep: true,
+      });
       return;
     }
 
-    if(s.type === "rest" || s.type === "block_rest"){
-      this.runCountdownThenTimer(Number(s.seconds || 0), { label: "Repos", autoAdvance: true, noPrep: true });
+    if (s.type === "rest" || s.type === "block_rest") {
+      this.runCountdownThenTimer(Number(s.seconds || 0), {
+        label: "Repos",
+        autoAdvance: true,
+        noPrep: true,
+      });
       return;
     }
 
-    if(s.type === "exercise_set"){
-      const w = s.work || { kind:"reps", reps: 10, capSec: 0 };
+    if (s.type === "exercise_set") {
+      const w = s.work || { kind: "reps", reps: 10, capSec: 0 };
 
-      if(w.kind === "hold"){
-        this.runCountdownThenTimer(Number(w.seconds || 0), { label: "Hold", autoAdvance: true });
+      if (w.kind === "hold") {
+        this.runCountdownThenTimer(Number(w.seconds || 0), {
+          label: "Hold",
+          autoAdvance: true,
+        });
         return;
       }
 
       const cap = Number(w.capSec || 0);
-      if(cap > 0){
-        this.runCountdownThenTimer(cap, { label: "Reps (cap)", autoAdvance: true });
+      if (cap > 0) {
+        this.runCountdownThenTimer(cap, {
+          label: "Reps (cap)",
+          autoAdvance: true,
+        });
         return;
       }
 
@@ -794,13 +948,16 @@ export class UI{
         this.el.primaryTime.textContent = "GO";
         this.el.primaryLabel.textContent = `Reps — ${w.reps} (valide quand fini)`;
         this.el.btnStartStep.textContent = "Série faite";
-        this.el.hint.textContent = "Clique “Série faite” quand terminé (le repos arrive après).";
+        this.el.hint.textContent =
+          "Clique “Série faite” quand terminé (le repos arrive après).";
         const handler = () => {
           this.el.btnStartStep.removeEventListener("click", handler);
-          this.el.btnStartStep.textContent = "Démarrer";
+          this.el.btnStartStep.textContent = "Pause";
           beep(880, 90, 0.07);
           this.nextStep();
+          this.maybeAutoStart();
         };
+
         this.el.btnStartStep.addEventListener("click", handler, { once: true });
       });
       return;
@@ -809,7 +966,7 @@ export class UI{
     this.nextStep();
   }
 
-  runPrepCountdown(sec, onDone){
+  runPrepCountdown(sec, onDone) {
     this.clearStepRuntime();
     this.stepMode = "countdown";
     let last = sec;
@@ -817,21 +974,31 @@ export class UI{
     this.el.primaryTime.textContent = fmtTime(sec);
     beep(440, 80, 0.05);
 
-    this.stepCountdown = new Countdown(sec, (rem) => {
-      this.el.primaryTime.textContent = fmtTime(rem);
-      if(rem !== last){
-        last = rem;
-        if(rem <= 3 && rem > 0) beep(660, 70, 0.06);
+    this.stepCountdown = new Countdown(
+      sec,
+      (rem) => {
+        this.el.primaryTime.textContent = fmtTime(rem);
+        if (rem !== last) {
+          last = rem;
+          if (rem <= 3 && rem > 0) beep(660, 70, 0.06);
+        }
+      },
+      () => {
+        onDone?.();
       }
-    }, () => { onDone?.(); });
+    );
 
     this.stepCountdown.start();
   }
 
-  runCountdownThenTimer(durationSec, opts){
+  runCountdownThenTimer(durationSec, opts) {
     const { label, autoAdvance, noPrep } = opts || {};
-    if(durationSec <= 0){
-      if(autoAdvance) this.nextStep();
+    if (durationSec <= 0) {
+      if (autoAdvance) {
+        this.nextStep();
+        // nextStep() appelle renderStep() qui appelle maybeAutoStart()
+      }
+
       return;
     }
 
@@ -846,61 +1013,87 @@ export class UI{
       const id = setInterval(() => {
         remaining -= 1;
         this.el.primaryTime.textContent = fmtTime(remaining);
-        if(remaining === 3) beep(660, 70, 0.06);
-        if(remaining <= 0){
+        if (remaining === 3) beep(660, 70, 0.06);
+        if (remaining <= 0) {
           clearInterval(id);
           tripleBeep();
-          if(autoAdvance) this.nextStep();
+          if (autoAdvance) this.nextStep();
         }
       }, 1000);
 
       this._stepIntervalId = id;
     };
 
-    if(noPrep) startTimer();
+    if (noPrep) startTimer();
     else this.runPrepCountdown(5, startTimer);
   }
 
-  restartCurrentStep(){
+  restartCurrentStep() {
     this.clearStepRuntime();
     this.el.btnStartStep.textContent = "Démarrer";
     this.renderStep();
   }
 
-  skipStep(){
+  skipStep() {
     this.clearStepRuntime();
     this.el.btnStartStep.textContent = "Démarrer";
     this.nextStep();
   }
 
-  nextStep(){
+  prevStep() {
+    this.clearStepRuntime();
+    this.el.btnStartStep.textContent = "Démarrer";
+    this.stepIndex = Math.max(0, this.stepIndex - 1);
+    this.renderStep();
+    this.maybeAutoStart(); // si autoRun actif, repart sur une étape "timée"
+  }
+  
+  maybeAutoStart() {
+    if (!this.autoRun) return;
+    if (this.isPaused) return;
+
+    const s = this.steps[this.stepIndex];
+    if (!s) return;
+
+    // BLOQUANT: reps sans cap => manuel
+    if (s.type === "exercise_set") {
+      const w = s.work || { kind: "reps", reps: 10, capSec: 0 };
+      if (w.kind === "reps" && Number(w.capSec || 0) <= 0) {
+        return;
+      }
+    }
+
+    setTimeout(() => this.startCurrentStep(true), 80);
+  }
+
+  nextStep() {
     this.clearStepRuntime();
     this.el.btnStartStep.textContent = "Démarrer";
     this.stepIndex = Math.min(this.steps.length, this.stepIndex + 1);
     this.renderStep();
   }
 
-  clearStepRuntime(){
-    if(this.stepCountdown){
+  clearStepRuntime() {
+    if (this.stepCountdown) {
       this.stepCountdown.stop();
       this.stepCountdown = null;
     }
-    if(this._stepIntervalId){
+    if (this._stepIntervalId) {
       clearInterval(this._stepIntervalId);
       this._stepIntervalId = null;
     }
     this.stepMode = "idle";
   }
 
-  async stopRunner(goSilent=false){
+  async stopRunner(goSilent = false) {
     this.clearStepRuntime();
     this.globalTimer?.stop?.();
     this.globalTimer = null;
     await releaseWakeLock();
-    if(!goSilent) this.el.globalTime.textContent = "00:00";
+    if (!goSilent) this.el.globalTime.textContent = "00:00";
   }
 
-  async stopAndReturn(){
+  async stopAndReturn() {
     await this.stopRunner(true);
     this.goLibrary();
   }
@@ -908,7 +1101,13 @@ export class UI{
   // -------------------------
   // OVERLAY API (in-app confirm/form)
   // -------------------------
-  openConfirm({ title, message, confirmText="OK", cancelText="Annuler", danger=false }){
+  openConfirm({
+    title,
+    message,
+    confirmText = "OK",
+    cancelText = "Annuler",
+    danger = false,
+  }) {
     const body = document.createElement("div");
     const p = document.createElement("div");
     p.className = "ov-note";
@@ -919,15 +1118,21 @@ export class UI{
       title,
       body,
       actions: [
-        { text: cancelText, kind:"ghost", value: false },
-        { text: confirmText, kind: danger ? "danger" : "primary", value: true }
-      ]
+        { text: cancelText, kind: "ghost", value: false },
+        { text: confirmText, kind: danger ? "danger" : "primary", value: true },
+      ],
     });
   }
 
-  openForm({ title, note="", fields=[], confirmText="OK", cancelText="Annuler" }){
+  openForm({
+    title,
+    note = "",
+    fields = [],
+    confirmText = "OK",
+    cancelText = "Annuler",
+  }) {
     const body = document.createElement("div");
-    if(note){
+    if (note) {
       const n = document.createElement("div");
       n.className = "ov-note";
       n.textContent = note;
@@ -937,7 +1142,7 @@ export class UI{
 
     const inputs = new Map();
 
-    for(const f of fields){
+    for (const f of fields) {
       const wrap = document.createElement("div");
       wrap.className = "ov-field";
 
@@ -945,24 +1150,24 @@ export class UI{
       label.textContent = f.label || f.key;
 
       let input;
-      if(f.type === "textarea"){
+      if (f.type === "textarea") {
         input = document.createElement("textarea");
         input.value = String(f.value ?? "");
-      }else if(f.type === "select"){
+      } else if (f.type === "select") {
         input = document.createElement("select");
-        for(const opt of (f.options || [])){
+        for (const opt of f.options || []) {
           const o = document.createElement("option");
           o.value = String(opt.value);
           o.textContent = String(opt.label);
-          if(String(opt.value) === String(f.value)) o.selected = true;
+          if (String(opt.value) === String(f.value)) o.selected = true;
           input.appendChild(o);
         }
-      }else{
+      } else {
         input = document.createElement("input");
         input.type = f.type || "text";
         input.value = String(f.value ?? "");
       }
-      if(f.required) input.setAttribute("data-required", "1");
+      if (f.required) input.setAttribute("data-required", "1");
 
       wrap.append(label, input);
       body.appendChild(wrap);
@@ -973,35 +1178,35 @@ export class UI{
       title,
       body,
       actions: [
-        { text: cancelText, kind:"ghost", value: null },
+        { text: cancelText, kind: "ghost", value: null },
         {
           text: confirmText,
-          kind:"primary",
+          kind: "primary",
           value: () => {
             // validate required
-            for(const [k, el] of inputs.entries()){
-              if(el.getAttribute("data-required") === "1"){
+            for (const [k, el] of inputs.entries()) {
+              if (el.getAttribute("data-required") === "1") {
                 const v = (el.value || "").trim();
-                if(!v){
+                if (!v) {
                   el.focus();
-                  this.toast("Champ requis", `Remplis: ${k}`, { danger:true });
+                  this.toast("Champ requis", `Remplis: ${k}`, { danger: true });
                   return null;
                 }
               }
             }
             const out = {};
-            for(const [k, el] of inputs.entries()){
+            for (const [k, el] of inputs.entries()) {
               out[k] = el.value;
             }
             return out;
-          }
-        }
+          },
+        },
       ],
-      focusFirstInput: true
+      focusFirstInput: true,
     });
   }
 
-  openOverlay({ title, body, actions = [], focusFirstInput=false }){
+  openOverlay({ title, body, actions = [], focusFirstInput = false }) {
     this.el.ovTitle.textContent = title || "Validation";
     this.el.ovBody.innerHTML = "";
     this.el.ovActions.innerHTML = "";
@@ -1015,32 +1220,34 @@ export class UI{
       const makeBtn = (a) => {
         const b = document.createElement("button");
         b.className = "btn";
-        if(a.kind === "ghost") b.className = "btn btn-ghost";
-        if(a.kind === "danger") b.className = "btn btn-danger";
+        if (a.kind === "ghost") b.className = "btn btn-ghost";
+        if (a.kind === "danger") b.className = "btn btn-danger";
         b.textContent = a.text;
         b.addEventListener("click", () => {
           let v = a.value;
-          if(typeof v === "function") v = v();
+          if (typeof v === "function") v = v();
           // si validator renvoie null => on ne ferme pas
-          if(typeof a.value === "function" && v === null) return;
+          if (typeof a.value === "function" && v === null) return;
           this.closeOverlay(v);
         });
         return b;
       };
 
-      for(const a of actions){
+      for (const a of actions) {
         this.el.ovActions.appendChild(makeBtn(a));
       }
 
-      if(focusFirstInput){
-        const first = this.el.ovBody.querySelector("input,textarea,select,button");
+      if (focusFirstInput) {
+        const first = this.el.ovBody.querySelector(
+          "input,textarea,select,button"
+        );
         first?.focus?.();
       }
     });
   }
 
-  closeOverlay(value){
-    if(this.el.overlay.hidden) return;
+  closeOverlay(value) {
+    if (this.el.overlay.hidden) return;
     this.el.overlay.hidden = true;
     const res = this._overlayResolve;
     this._overlayResolve = null;
@@ -1050,11 +1257,11 @@ export class UI{
   // -------------------------
   // TOASTS
   // -------------------------
-  toast(title, subtitle="", opts={}){
+  toast(title, subtitle = "", opts = {}) {
     const id = ++this._toastId;
     const t = document.createElement("div");
     t.className = "toast";
-    if(opts.danger){
+    if (opts.danger) {
       t.style.borderColor = "rgba(255,59,92,.6)";
     }
     t.innerHTML = `
@@ -1070,7 +1277,7 @@ export class UI{
 
     const ttl = opts.ttlMs ?? 2600;
     window.setTimeout(() => {
-      if(t.isConnected) t.remove();
+      if (t.isConnected) t.remove();
     }, ttl);
 
     return id;
@@ -1078,12 +1285,12 @@ export class UI{
 }
 
 // helpers
-function clampInt(v, min, max){
+function clampInt(v, min, max) {
   const n = Math.floor(Number(v || 0));
-  if(Number.isNaN(n)) return min;
+  if (Number.isNaN(n)) return min;
   return Math.max(min, Math.min(max, n));
 }
-function escapeHtml(s){
+function escapeHtml(s) {
   return String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -1091,4 +1298,6 @@ function escapeHtml(s){
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
-function escapeAttr(s){ return escapeHtml(s).replaceAll("\n", " "); }
+function escapeAttr(s) {
+  return escapeHtml(s).replaceAll("\n", " ");
+}
