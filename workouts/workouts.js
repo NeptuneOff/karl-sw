@@ -12,6 +12,34 @@ function boot() {
   initAudioPreferences();
   const btnMute = document.getElementById("btnMute");
 
+  // --- THEMES (persistant) ---
+  const THEME_KEY = "site:theme";
+  const THEMES = ["dark", "light", "neon"];
+
+  const btnTheme = document.getElementById("btnTheme");
+
+  function applyTheme(theme) {
+    const t = THEMES.includes(theme) ? theme : "dark";
+    document.documentElement.setAttribute("data-theme", t);
+    localStorage.setItem(THEME_KEY, t);
+
+    if (btnTheme) {
+      const label = t === "dark" ? "Dark" : t === "light" ? "Light" : "Neon";
+      btnTheme.textContent = `Thème: ${label}`;
+    }
+  }
+
+  function cycleTheme() {
+    const cur = localStorage.getItem(THEME_KEY) || "dark";
+    const idx = THEMES.indexOf(cur);
+    const next = THEMES[(idx + 1) % THEMES.length];
+    applyTheme(next);
+  }
+
+  // init
+  applyTheme(localStorage.getItem(THEME_KEY) || "dark");
+  btnTheme?.addEventListener("click", cycleTheme);
+
   const refreshMuteUi = () => {
     const m = isMuted();
     btnMute.textContent = m ? "Son: OFF" : "Son: ON";
