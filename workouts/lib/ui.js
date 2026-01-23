@@ -8,6 +8,7 @@ import { flattenWorkout } from "./flatten.js";
 import { Countdown, fmtTime, IntervalTimer } from "./timers.js";
 import { beep, tripleBeep } from "./audio.js";
 import { requestWakeLock, releaseWakeLock } from "./wake.js";
+import { CATALOG } from "./catalog.js";
 
 export class UI {
   constructor(store) {
@@ -53,6 +54,10 @@ export class UI {
     root.querySelectorAll(".tab").forEach((btn) => {
       btn.addEventListener("click", () => this.showTab(btn.dataset.tab));
     });
+    this.el.btnAddFromCatalog = root.querySelector("#btnAddFromCatalog");
+    this.el.btnAddFromCatalog?.addEventListener("click", () =>
+      this.openCatalogPicker(),
+    );
 
     // library elements
     this.el.grid = root.querySelector("#workoutGrid");
@@ -110,10 +115,10 @@ export class UI {
     this.el.btnStop = root.querySelector("#btnStop");
 
     this.el.btnStartStep.addEventListener("click", () =>
-      this.startCurrentStep()
+      this.startCurrentStep(),
     );
     this.el.btnRestartStep.addEventListener("click", () =>
-      this.restartCurrentStep()
+      this.restartCurrentStep(),
     );
     this.el.btnPrevStep.addEventListener("click", () => this.prevStep());
     this.el.btnSkipStep.addEventListener("click", () => this.skipStep());
@@ -225,7 +230,7 @@ export class UI {
     this.root
       .querySelectorAll(".tab")
       .forEach((t) =>
-        t.setAttribute("aria-selected", String(t.dataset.tab === name))
+        t.setAttribute("aria-selected", String(t.dataset.tab === name)),
       );
     this.root
       .querySelectorAll(".view")
@@ -259,7 +264,7 @@ export class UI {
           <div class="step-title">${escapeHtml(w.title)}</div>
         </div>
         <div class="small">Maj: ${escapeHtml(
-          (w.updatedAt || "").slice(0, 16).replace("T", " ")
+          (w.updatedAt || "").slice(0, 16).replace("T", " "),
         )}</div>
       `;
       card.addEventListener("click", () => this.selectWorkout(w.id));
@@ -384,7 +389,7 @@ export class UI {
         tail.push(`rest fin: ${node.restEndSec}s`);
       if (node.kind === "emom")
         tail.push(
-          `EMOM: ${node.emom?.rounds || 0}x${node.emom?.intervalSec || 0}s`
+          `EMOM: ${node.emom?.rounds || 0}x${node.emom?.intervalSec || 0}s`,
         );
       subtitle.textContent = tail.join(" • ");
     } else {
@@ -400,7 +405,7 @@ export class UI {
         const t = document.createElement("div");
         t.append(title, subtitle);
         return t;
-      })()
+      })(),
     );
 
     const actions = document.createElement("div");
@@ -476,14 +481,14 @@ export class UI {
       target.nodes.push(b);
       this.toast(
         "EMOM ajouté",
-        "Configure intervalle + rounds dans Propriétés."
+        "Configure intervalle + rounds dans Propriétés.",
       );
     } else if (kind === "exercise") {
       const ex = createExercise("Exercice");
       target.nodes.push(ex);
       this.toast(
         "Exercice ajouté",
-        "Renomme-le et configure les séries dans Propriétés."
+        "Renomme-le et configure les séries dans Propriétés.",
       );
     }
 
@@ -514,7 +519,7 @@ export class UI {
     if (!ok) return;
 
     found.parent.nodes = found.parent.nodes.filter(
-      (n) => n.id !== this.selectedNodeId
+      (n) => n.id !== this.selectedNodeId,
     );
     this.selectedNodeId = root.id;
     this.el.btnDeleteNode.disabled = true;
@@ -559,7 +564,7 @@ export class UI {
         <div class="field">
           <label>Repos fin de bloc (sec)</label>
           <input id="p_restEnd" type="number" min="0" step="5" value="${Number(
-            node.restEndSec || 0
+            node.restEndSec || 0,
           )}" />
         </div>
 
@@ -570,14 +575,14 @@ export class UI {
           <div class="field">
             <label>EMOM — Intervalle (sec)</label>
             <input id="p_emomInterval" type="number" min="10" step="5" value="${Number(
-              node.emom?.intervalSec || 60
+              node.emom?.intervalSec || 60,
             )}" />
             <div class="mini">Le runner attend la fin de l’interval après les exos.</div>
           </div>
           <div class="field">
             <label>EMOM — Rounds</label>
             <input id="p_emomRounds" type="number" min="1" step="1" value="${Number(
-              node.emom?.rounds || 10
+              node.emom?.rounds || 10,
             )}" />
           </div>
         `
@@ -1017,7 +1022,7 @@ export class UI {
       },
       () => {
         onDone?.();
-      }
+      },
     );
 
     this.stepCountdown.start();
@@ -1128,6 +1133,80 @@ export class UI {
   async stopAndReturn() {
     await this.stopRunner(true);
     this.goLibrary();
+  }
+
+  async openCatalogPicker() {
+    const parent = this.getSelectedContainerForInsert();
+    if (!parent) {
+      this.toast(
+        "Sélection requise",
+        "Sélectionne un bloc (ou sous-partie) pour y ajouter un exercice.",
+        { danger: true },
+      );
+      return;
+    }
+
+    // Form overlay = propre (pas de popup navigateur)
+    const optionsHtml = CATALOG.map(
+      (x) =>
+        `<option value="${escapeAttr(x.id)}">${escapeHtml(x.name)}</option>`,
+    ).join("");
+
+    const res = await this.openForm({
+      title: "Ajouter un exercice (catalogue)",
+      note: "Choisis un exercice préconfiguré. Il sera dupliqué dans ta séance et restera modifiable.",
+      fields: [
+        {
+          key: "item",
+          label: "Exercice",
+          type: "select",
+          value: CATALOG[0]?.id || "",
+          required: true,
+          optionsHtml,
+        },
+        {
+          key: "sets",
+          label: "Nombre de séries (optionnel)",
+          type: "number",
+          value: "",
+          required: false,
+          placeholder: "ex: 3",
+        },
+      ],
+      confirmText: "Ajouter",
+      cancelText: "Annuler",
+    });
+
+    if (!res) return;
+
+    const tpl = CATALOG.find((x) => x.id === res.item);
+    if (!tpl) return;
+
+    const forcedSets = Number(res.sets || 0);
+    const sets = JSON.parse(JSON.stringify(tpl.defaultSets || []));
+
+    // si user force nb de sets : on répète le 1er set
+    let finalSets = sets;
+    if (forcedSets > 0) {
+      const base =
+        sets[0] ||
+        (tpl.defaultKind === "hold"
+          ? { kind: "hold", seconds: 10, rest: 60 }
+          : { kind: "reps", reps: 5, capSec: 0, rest: 120 });
+      finalSets = Array.from({ length: forcedSets }, () => ({ ...base }));
+    }
+
+    const node = this.createExerciseNode({
+      name: tpl.name,
+      description: tpl.description || "",
+      sets: finalSets,
+    });
+
+    parent.children.push(node);
+    this.selectNode(node.id);
+    this.persist();
+    this.renderEditor();
+    this.toast("Ajouté", tpl.name);
   }
 
   // -------------------------
@@ -1271,7 +1350,7 @@ export class UI {
 
       if (focusFirstInput) {
         const first = this.el.ovBody.querySelector(
-          "input,textarea,select,button"
+          "input,textarea,select,button",
         );
         first?.focus?.();
       }
